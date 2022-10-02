@@ -7,7 +7,8 @@
 #include <ctype.h>
 #include <editline.h>
 
-#define WORDS_FILENAME "/usr/share/dict/words"
+// #define WORDS_FILENAME "/usr/share/dict/words"
+#define WORDS_FILENAME "wordlist.txt"
 #define WORDLEN 5
 #define LINEMAX 256
 #define WHITESPACE " \t\r\n"
