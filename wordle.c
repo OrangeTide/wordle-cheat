@@ -282,12 +282,18 @@ filter_check(const char *value)
 }
 
 void
-words_init(void)
+words_reset(void)
 {
 	int i;
 	for (i = 0; i < WORDLEN; i++) {
 		strcpy(valid_set[i], alphabet);
 	}
+}
+
+void
+words_init(void)
+{
+	words_reset();
 
 	FILE *f = fopen(WORDS_FILENAME, "r");
 	if (!f) {
@@ -405,6 +411,7 @@ help(void)
 {
 	printf("Command reference:\n"
 	       "  quit - terminate the program\n"
+	       "  reset - reset the valid letter set\n"
 	       "  try [pattern] - try a pattern\n"
 	       "  eliminate [letters] - remove letters to the valid set\n"
 	       "  -[letters] - short-cut for 'eliminate'\n"
@@ -456,6 +463,8 @@ command(char *line)
 		return ERR;
 	} else if (!strcmp("help", cmd)) {
 		help();
+	} else if (!strcmp("reset", cmd)) {
+		words_reset();
 	} else if (!strcmp("try", cmd)) {
 		if (!*line) {
 			printf("Usage: try [word-pattern] [optional-required-letters]\n");
