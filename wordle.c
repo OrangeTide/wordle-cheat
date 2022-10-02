@@ -11,6 +11,7 @@
 #define WORDLEN 5
 #define LINEMAX 256
 #define WHITESPACE " \t\r\n"
+#define ALPHABETSET_LEN (26 + 1) /* A-Z plus null terminator */
 
 #define OK (0)
 #define ERR (-1)
@@ -31,8 +32,8 @@ union word_node {
 };
 
 static union word_node *top_node;
-static char valid_set[27];
-static const char alphabet[27] = "abcdefghijklmnopqrstuvwxyz";
+static char valid_set[WORDLEN][ALPHABETSET_LEN];
+static const char alphabet[ALPHABETSET_LEN] = "abcdefghijklmnopqrstuvwxyz";
 
 /* create a union word_node pointer from a struct word_inner pointer */
 static inline union word_node *
@@ -179,13 +180,101 @@ words_add(const char *s, int n)
 }
 
 static int
+add_to_set(const char *set, char dest[ALPHABETSET_LEN])
+{
+	char c;
+	unsigned len = strlen(dest);
+	while ((c = *set++)) {
+		/* skip if already in set */
+		char *p = strchr(dest, c);
+		if (p) continue;
+
+		if (len + 1 >= ALPHABETSET_LEN) {
+			fprintf(stderr, "ERROR in adding to set\n");
+			return ERR;
+		}
+		/* append to end of set */
+		dest[len++] = c;
+		dest[len] = 0;
+	}
+
+	return OK;
+}
+
+static int
+add_to_valid_set(const char *set, int i)
+{
+	return add_to_set(set, valid_set[i]);
+}
+
+static void
+remove_from_set(const char *set, char dest[ALPHABETSET_LEN])
+{
+	char c;
+	if (!dest) {
+		return;
+	}
+	unsigned len = strlen(dest);
+	while ((c = *set++)) {
+		/* find point to trim */
+		char *p = strchr(dest, c);
+		if (!p) continue;
+		unsigned rem = len - (p - dest);
+
+		if (rem) {
+			memmove(p, p + 1, rem);
+		} else {
+			*p = 0;
+		}
+	}
+}
+
+static void
+remove_from_valid_set(const char *set, int i)
+{
+	remove_from_set(set, valid_set[i]);
+}
+
+static int
+required_set_check(const char *value, const char *required_set)
+{
+	char set[ALPHABETSET_LEN];
+
+	if (required_set) {
+		strcpy(set, required_set);
+	} else {
+		set[0] = 0; /* empty set */
+	}
+
+	for (; *value; value++) {
+		char c = tolower(*value);
+		if (!isalpha(c)) {
+			continue; /* ignore punctuation and markup */
+		}
+		if (strchr(set, c)) {
+			char single[2] = { c, 0 };
+			remove_from_set(single, set);
+			// printf("Removed %s from %s\n", single, set);
+		}
+	}
+
+	/* did we empty the set? */
+	if (set[0]) {
+		// printf("Warning: still in set: %s\n", set);
+		return ERR;
+	}
+
+	return OK;
+}
+
+static int
 filter_check(const char *value)
 {
-	while (*value) {
-		if (!strchr(valid_set, *value)) {
+	int i;
+	for(i = 0; *value; value++, i++) {
+		if (!strchr(valid_set[i], tolower(*value))) {
 			return ERR; /* no match */
 		}
-		value++;
 	}
 
 	return OK;
@@ -194,7 +283,10 @@ filter_check(const char *value)
 void
 words_init(void)
 {
-	strcpy(valid_set, alphabet);
+	int i;
+	for (i = 0; i < WORDLEN; i++) {
+		strcpy(valid_set[i], alphabet);
+	}
 
 	FILE *f = fopen(WORDS_FILENAME, "r");
 	if (!f) {
@@ -243,10 +335,15 @@ words_find(const char *key)
 static int
 pattern_check(const char *value, const char *pattern)
 {
-	while (*value) {
+	int i;
+	for(i = 0; *value; value++, pattern++, i++) {
+		if (i >= WORDLEN) {
+			printf("ERROR: Pattern length exceeds WORDLEN (%d)\n", i);
+			return ERR;
+		}
 		if (*pattern == '?') {
 			/* wildcards must match the filter set */
-			if (!strchr(valid_set, tolower(*value))) {
+			if (!strchr(valid_set[i], tolower(*value))) {
 				return ERR; /* not in filter set */
 			}
 		} else {
@@ -255,9 +352,6 @@ pattern_check(const char *value, const char *pattern)
 				return ERR; /* no match */
 			}
 		}
-
-		value++;
-		pattern++;
 	}
 
 	/* must have consumed entire pattern */
@@ -265,14 +359,19 @@ pattern_check(const char *value, const char *pattern)
 }
 
 static void
-test(union word_node *curr, const char *pattern)
+test(union word_node *curr, const char *pattern, const char *required_set)
 {
+	/* treat empty set as same as a missing (NULL) set */
+	if (required_set && !*required_set) {
+		required_set = NULL;
+	}
+
 	if (IS_INNER(curr)) {
 		struct word_inner *inner = inner_ptr(curr);
 
 		unsigned dir;
 		for (dir = 0; dir < 2; dir++) {
-			test(inner->child[dir], pattern);
+			test(inner->child[dir], pattern, required_set);
 		}
 	} else {
 		const char *key = keyget(curr);
@@ -281,49 +380,22 @@ test(union word_node *curr, const char *pattern)
 			exit(1);
 		}
 		if (pattern_check(key, pattern) == OK) {
-			printf("WORD: %s\n", key);
+			if (!required_set || required_set_check(key, required_set) == OK) {
+				printf("WORD: %s\n", key);
+			}
 		}
 	}
-}
-
-static int
-add_to_set(const char *set)
-{
-	char c;
-	unsigned len = strlen(valid_set);
-	while ((c = *set++)) {
-		/* skip if already in set */
-		char *p = strchr(valid_set, c);
-		if (p) continue;
-
-		if (len + 1 >= sizeof(valid_set)) {
-			fprintf(stderr, "ERROR in adding to set\n");
-			return ERR;
-		}
-		/* append to end of set */
-		valid_set[len++] = c;
-		valid_set[len] = 0;
-	}
-
-	return OK;
 }
 
 static void
-remove_from_set(const char *set)
+print_valid_set(const char *label)
 {
-	char c;
-	unsigned len = strlen(valid_set);
-	while ((c = *set++)) {
-		/* find point to trim */
-		char *p = strchr(valid_set, c);
-		if (!p) continue;
-		unsigned rem = len - (p - valid_set);
-
-		if (rem) {
-			memmove(p, p + 1, rem);
-		} else {
-			*p = 0;
-		}
+	if (label) {
+		puts(label);
+	}
+	int i;
+	for (i = 0; i < WORDLEN; i++) {
+		printf("    [%2d] %s\n", i + 1, valid_set[i]);
 	}
 }
 
@@ -334,25 +406,44 @@ help(void)
 	       "  quit - terminate the program\n"
 	       "  try [pattern] - try a pattern\n"
 	       "  eliminate [letters] - remove letters to the valid set\n"
+	       "  -[letters] - short-cut for 'eliminate'\n"
 	       "  restore [letters] - add letters to the valid set\n"
+	       "  +[letters] - short-cut for 'restore'\n"
+	       "  guess - TBD\n"
 	      );
 }
 
 static int
 command(char *line)
 {
+	char cmdtmp[2];
+
 	/* discard leading whitespace */
 	while (isspace(*line)) {
 		line++;
 	}
 
-	/* extract first word */
-	const char *cmd = line;
-	int cmdlen = strcspn(line, WHITESPACE);
-	line += cmdlen;
-	if (*line) {
-		*line = 0;
-		line++;
+	if (!*line) {
+		return OK; /* ignore blank lines */
+	}
+
+	const char *cmd;
+
+	/* check if the first letter is a punctuation shortcut */
+	if (ispunct(*line)) {
+		/* copy punctuation into temp buffer */
+		cmdtmp[0] = *line++;
+		cmdtmp[1] = 0;
+		cmd = cmdtmp;
+	} else {
+		/* extract first word */
+		cmd = line;
+		int cmdlen = strcspn(line, WHITESPACE);
+		line += cmdlen;
+		if (*line) {
+			*line = 0;
+			line++;
+		}
 	}
 
 	/* discard whitespace after first word */
@@ -366,21 +457,62 @@ command(char *line)
 		help();
 	} else if (!strcmp("try", cmd)) {
 		if (!*line) {
-			printf("Usage: try [word-pattern]\n");
+			printf("Usage: try [word-pattern] [optional-required-letters]\n");
+		}
+
+		/* extract first argument */
+		const char *first = line;
+		int firstlen = strcspn(first, WHITESPACE);
+		line += firstlen;
+		if (*line) {
+			*line = 0;
+			line++;
+		}
+		while (isspace(*line)) {
+			line++;
+		}
+
+		/* extract second argument */
+		const char *second = line;
+		int secondlen = strcspn(second, WHITESPACE);
+		line += secondlen;
+		if (*line) {
+			*line = 0;
+			line++;
+		}
+		while (isspace(*line)) {
+			line++;
+		}
+
+		printf("TRY \"%s\" [%s]\n", first, second);
+		test(top_node, first, second);
+	} else if (!strcmp("eliminate", cmd) || !strcmp("-", cmd)) {
+		print_valid_set("OLD set: ");
+		int i;
+		for (i = 0; i < WORDLEN; i++) {
+			remove_from_valid_set(line, i);
+		}
+		print_valid_set("NEW set: ");
+	} else if (!strcmp("restore", cmd) || !strcmp("+", cmd)) {
+		print_valid_set("OLD set: ");
+		int i;
+		for (i = 0; i < WORDLEN; i++) {
+			add_to_valid_set(line, i);
+		}
+		print_valid_set("NEW set: ");
+	} else if (!strcmp("guess", cmd)) {
+		if (!*line) {
+			printf("Usage: guess [word]\n");
 		}
 		if (filter_check(line) != OK) {
-			printf("Unknown command!\n");
+			printf("Word not found! (%s)\n", line);
+		} else {
+			printf("Possible match (%s)\n", line);
 		}
-		printf("TRY %s\n", line);
-		test(top_node, line);
-	} else if (!strcmp("eliminate", cmd)) {
-		printf("OLD set: %s\n", valid_set);
-		remove_from_set(line);
-		printf("NEW set: %s\n", valid_set);
-	} else if (!strcmp("restore", cmd)) {
-		printf("OLD set: %s\n", valid_set);
-		add_to_set(line);
-		printf("NEW set: %s\n", valid_set);
+		// TODO: parse a markup for the guess result
+		// "guess" no mark-up, don't update any state
+		// "!g!u!e!s!s" every letter failed
+		// "g?uess" letter 'u' present but in wrong position
 	} else {
 		printf("Unknown command!\n");
 	}
@@ -411,7 +543,7 @@ main()
 	printf("%s\n", words_find("stone") ? : "ERROR");
 	printf("%s\n", words_find("foggy") ? : "ERROR");
 	printf("%s\n", words_find("vwxyz") ? : "UNKNOWN");
-	test(top_node, "?dd??");
+	test(top_node, "?dd??", NULL);
 #endif
 
 	help();
