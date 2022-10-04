@@ -534,7 +534,10 @@ static void
 interactive(void)
 {
 	char *line;
-        while ((line = readline("CLI> ")) != NULL) {
+        while ((line = readline("> ")) != NULL) {
+		if (*line) {
+			add_history(line);
+		}
 		int result = command(line);
 		free(line);
 		if (result != OK) {
