@@ -34,6 +34,7 @@ union word_node {
 
 static union word_node *top_node;
 static char valid_set[WORDLEN][ALPHABETSET_LEN];
+static char needed_set[ALPHABETSET_LEN]; /* default set for try patterns */
 static const char alphabet[ALPHABETSET_LEN] = "abcdefghijklmnopqrstuvwxyz";
 
 /* create a union word_node pointer from a struct word_inner pointer */
@@ -205,7 +206,20 @@ add_to_set(const char *set, char dest[ALPHABETSET_LEN])
 static int
 add_to_valid_set(const char *set, int i)
 {
+	if (i < 0 || i >= WORDLEN) {
+		return ERR;
+	}
 	return add_to_set(set, valid_set[i]);
+}
+
+static int
+set_valid_set(const char *set, int i)
+{
+	if (i < 0 || i >= WORDLEN) {
+		return ERR;
+	}
+	valid_set[i][0] = 0; /* clear the valid set */
+	return add_to_valid_set(set, i); /* add a letter back in */
 }
 
 static void
@@ -230,10 +244,14 @@ remove_from_set(const char *set, char dest[ALPHABETSET_LEN])
 	}
 }
 
-static void
+static int
 remove_from_valid_set(const char *set, int i)
 {
+	if (i < 0 || i >= WORDLEN) {
+		return ERR;
+	}
 	remove_from_set(set, valid_set[i]);
+	return OK;
 }
 
 static int
@@ -291,6 +309,8 @@ words_reset(void)
 
 	/* wordle words never end in 's' */
 	remove_from_valid_set("s", WORDLEN - 1);
+
+	needed_set[0] = 0;
 }
 
 void
@@ -421,12 +441,25 @@ wordwrap_print(const char *word)
 }
 
 
-static void
+static int
 test(union word_node *curr, const char *pattern, const char *required_set)
 {
+	int count = 0;
+	char dummypattern[WORDLEN+1];
+
 	/* treat empty set as same as a missing (NULL) set */
 	if (required_set && !*required_set) {
 		required_set = NULL;
+	}
+
+	/* if pattern is NULL or empty, apply a default pattern "?????" */
+	if (!pattern || !*pattern) {
+		int i;
+		for (i = 0; i < WORDLEN; i++) {
+			dummypattern[i] = '?';
+		}
+		dummypattern[i] = 0;
+		pattern = dummypattern;
 	}
 
 	if (IS_INNER(curr)) {
@@ -434,7 +467,7 @@ test(union word_node *curr, const char *pattern, const char *required_set)
 
 		unsigned dir;
 		for (dir = 0; dir < 2; dir++) {
-			test(inner->child[dir], pattern, required_set);
+			count += test(inner->child[dir], pattern, required_set);
 		}
 	} else {
 		const char *key = keyget(curr);
@@ -445,9 +478,12 @@ test(union word_node *curr, const char *pattern, const char *required_set)
 		if (pattern_check(key, pattern) == OK) {
 			if (!required_set || required_set_check(key, required_set) == OK) {
 				wordwrap_print(key);
+				count++;
 			}
 		}
 	}
+
+	return count;
 }
 
 static void
@@ -460,6 +496,7 @@ print_valid_set(const char *label)
 	for (i = 0; i < WORDLEN; i++) {
 		printf("    [%2d] %s\n", i + 1, valid_set[i]);
 	}
+	printf("   NEED: %s\n", needed_set);
 }
 
 static void
@@ -473,7 +510,7 @@ help(void)
 	       "  -[letters] - short-cut for 'eliminate'\n"
 	       "  restore [letters] - add letters to the valid set\n"
 	       "  +[letters] - short-cut for 'restore'\n"
-	       "  guess - TBD\n"
+	       "  guess - record a guess and its result\n"
 	      );
 }
 
@@ -529,6 +566,96 @@ get_positions(char **line_inout)
 }
 
 static int
+guess(char *line)
+{
+	/* extract first argument */
+	const char *first = line;
+	int firstlen = strcspn(first, WHITESPACE);
+	line += firstlen;
+	if (*line) {
+		*line = 0;
+		line++;
+	}
+	while (isspace(*line)) {
+		line++;
+	}
+
+	/* extract second argument */
+	const char *second = line;
+	int secondlen = strcspn(second, WHITESPACE);
+	line += secondlen;
+	if (*line) {
+		*line = 0;
+		line++;
+	}
+	while (isspace(*line)) {
+		line++;
+	}
+
+	if (!*first || !*second || *line) {
+		printf ("ERROR: must provide exactly 2 arguments\n");
+		return ERR; /* we must have exactly 2 arguments */
+	}
+
+	if (firstlen != secondlen && firstlen != WORDLEN) {
+		printf("ERROR: guess must exactly match result and WORDLEN\n");
+		return ERR; /* guess must exactly match result and WORDLEN. */
+	}
+
+#if 0
+	if (filter_check(first) != OK) {
+		printf("Word not found in dictionary! (%s)\n", first);
+		return ERR;
+	}
+#endif
+
+	// DEBUG: printf("FIRST=\"%s\" SECOND=\"%s\"\n", first, second);
+
+	char set[2];
+	int i, j;
+	for (i = 0; i < secondlen; i++) {
+		// DEBUG: printf("i=%d\n", i);
+		switch (second[i]) {
+		case '0':
+		case 'x':
+			/* letter not found */
+			set[0] = first[i];
+			set[1] = 0;
+			for (j = 0; j < WORDLEN; j++) {
+				remove_from_valid_set(set, i);
+			}
+			// DEBUG: printf("[%d] not found\n", i);
+			break;
+		case '?':
+		case 'y':
+			/* letter in word but not this position */
+			set[0] = first[i];
+			set[1] = 0;
+			remove_from_valid_set(set, i);
+			add_to_set(set, needed_set);
+			// DEBUG: printf("[%d] maybe %c\n", i, first[i]);
+			break;
+		case '!':
+		case 'g':
+			/* letter known to be at this position */
+			set[0] = first[i];
+			set[1] = 0;
+			set_valid_set(set, i);
+			add_to_set(set, needed_set);
+			// DEBUG: printf("[%d] match!\n", i);
+			break;
+		case '.':
+			/* ignore this position */
+			break;
+		default:
+			return ERR;
+		}
+	}
+
+	return OK;
+}
+
+static int
 command(char *line)
 {
 	char cmdtmp[2];
@@ -574,7 +701,7 @@ command(char *line)
 		words_reset();
 	} else if (!strcmp("try", cmd)) {
 		if (!*line) {
-			printf("Usage: try [word-pattern] [optional-required-letters]\n");
+			printf("Usage: try <word-pattern> [<optional-required-letters> | -]\n");
 			return OK;
 		}
 
@@ -604,8 +731,9 @@ command(char *line)
 
 		printf("TRY \"%s\" [%s]\n", first, second);
 		wordwrap_start();
-		test(top_node, first, second);
+		int count = test(top_node, first, *second ? *second == '-' ? NULL : second : needed_set);
 		wordwrap_end();
+		printf("Found %d words\n", count);
 	} else if (!strcmp("eliminate", cmd) || !strcmp("-", cmd)) {
 		const char *positions = get_positions(&line);
 		if (!positions) {
@@ -635,18 +763,20 @@ command(char *line)
 		}
 		print_valid_set("NEW set: ");
 	} else if (!strcmp("guess", cmd)) {
-		if (!*line) {
-			printf("Usage: guess [word]\n");
+		if (guess(line) != OK) {
+			printf("Usage: guess <word> <result>\n"
+			       "    result must contain %d characters in the form of:\n"
+			       "       0/x - grey, no match\n"
+			       "       ?/y - yellow, in word but not in this position\n"
+			       "       !/g - green, letter in this position\n"
+			       "       .   - ignore this position\n", WORDLEN);
 		}
-		if (filter_check(line) != OK) {
-			printf("Word not found! (%s)\n", line);
-		} else {
-			printf("Possible match (%s)\n", line);
-		}
-		// TODO: parse a markup for the guess result
-		// "guess" no mark-up, don't update any state
-		// "!g!u!e!s!s" every letter failed
-		// "g?uess" letter 'u' present but in wrong position
+
+		wordwrap_start();
+		int count = test(top_node, NULL, needed_set);
+		wordwrap_end();
+		printf("Found %d words\n", count);
+		print_valid_set("NEW set: ");
 	} else {
 		printf("Unknown command!\n");
 	}
