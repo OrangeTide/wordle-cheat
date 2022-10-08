@@ -477,6 +477,57 @@ help(void)
 	      );
 }
 
+static const char *
+get_positions(char **line_inout)
+{
+	static char positions[WORDLEN + 1];
+	char *line = *line_inout;
+	int i;
+
+	if (*line == '[') {
+		/* load digits between [] into our set */
+		line++;
+		int n = strcspn(line, "]");
+		if (n > WORDLEN || !line[n]) {
+			return NULL; /* error */
+		}
+		memcpy(positions, line, n);
+		positions[n] = 0;
+		line += n + 1;
+		while (isspace(*line)) {
+			line++;
+		}
+	} else if (isdigit(*line)) {
+		/* if line starts with digits, treat those as the set */
+		int n = strspn(line, "0123456789");
+		if (n > WORDLEN || !line[n]) {
+			return NULL; /* error */
+		}
+		memcpy(positions, line, n);
+		positions[n] = 0;
+		line += n;
+		while (isspace(*line)) {
+			line++;
+		}
+	} else {
+		/* initialize with all numbers in the set */
+		for (i = 0; i < WORDLEN; i++) {
+			positions[i] = '1' + i;
+		}
+		positions[i] = 0;
+	}
+
+	/* validate string - must only contain numbers in range */
+	for (i = 0; positions[i]; i++) {
+		if (positions[i] < '1' || positions[i] > ('0' + WORDLEN)) {
+			return NULL; /* error */
+		}
+	}
+
+	*line_inout = line;
+	return positions;
+}
+
 static int
 command(char *line)
 {
@@ -524,6 +575,7 @@ command(char *line)
 	} else if (!strcmp("try", cmd)) {
 		if (!*line) {
 			printf("Usage: try [word-pattern] [optional-required-letters]\n");
+			return OK;
 		}
 
 		/* extract first argument */
@@ -555,17 +607,31 @@ command(char *line)
 		test(top_node, first, second);
 		wordwrap_end();
 	} else if (!strcmp("eliminate", cmd) || !strcmp("-", cmd)) {
+		const char *positions = get_positions(&line);
+		if (!positions) {
+			printf("Usage: eliminate [<12345>] <letters>\n");
+			return OK;
+		}
+
 		print_valid_set("OLD set: ");
 		int i;
-		for (i = 0; i < WORDLEN; i++) {
-			remove_from_valid_set(line, i);
+		for (i = 0; i < WORDLEN && positions[i]; i++) {
+			printf("Removing #%c '%s'\n", positions[i], line);
+
+			remove_from_valid_set(line, positions[i] - '1');
 		}
 		print_valid_set("NEW set: ");
 	} else if (!strcmp("restore", cmd) || !strcmp("+", cmd)) {
+		const char *positions = get_positions(&line);
+		if (!positions) {
+			printf("Usage: restore [<12345>] <letters>\n");
+			return OK;
+		}
+
 		print_valid_set("OLD set: ");
 		int i;
-		for (i = 0; i < WORDLEN; i++) {
-			add_to_valid_set(line, i);
+		for (i = 0; i < WORDLEN && positions[i]; i++) {
+			add_to_valid_set(line, positions[i] - '1');
 		}
 		print_valid_set("NEW set: ");
 	} else if (!strcmp("guess", cmd)) {
