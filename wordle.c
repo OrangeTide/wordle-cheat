@@ -614,17 +614,26 @@ guess(char *line)
 	char set[2];
 	int i, j;
 	for (i = 0; i < secondlen; i++) {
-		// DEBUG: printf("i=%d\n", i);
+		// DEBUG: printf("i=%d c='%c'\n", i, second[i]);
 		switch (second[i]) {
 		case '0':
 		case 'x':
 			/* letter not found */
 			set[0] = first[i];
 			set[1] = 0;
+
+			/* check if letter appears in multiple positions */
 			for (j = 0; j < WORDLEN; j++) {
-				remove_from_valid_set(set, i);
+				if (i != j && first[j] == first[i]) {
+					// TODO: need to handle this case more cleverly
+					goto skip_not_found;
+				}
 			}
-			// DEBUG: printf("[%d] not found\n", i);
+
+			for (j = 0; j < WORDLEN; j++) {
+				remove_from_valid_set(set, j);
+			}
+skip_not_found:
 			break;
 		case '?':
 		case 'y':
@@ -744,8 +753,6 @@ command(char *line)
 		print_valid_set("OLD set: ");
 		int i;
 		for (i = 0; i < WORDLEN && positions[i]; i++) {
-			printf("Removing #%c '%s'\n", positions[i], line);
-
 			remove_from_valid_set(line, positions[i] - '1');
 		}
 		print_valid_set("NEW set: ");
