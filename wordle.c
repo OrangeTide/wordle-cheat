@@ -365,6 +365,59 @@ pattern_check(const char *value, const char *pattern)
 	return *pattern == 0 ? OK : ERR;
 }
 
+static unsigned wordwrap_columns;
+static unsigned wordwrap_position;
+
+static void
+wordwrap_start(void)
+{
+	const char *env_columns = getenv("COLUMNS");
+	wordwrap_columns = env_columns ? atoi(env_columns) : 80;
+	wordwrap_position = 0;
+}
+
+static void
+wordwrap_end(void)
+{
+	if (wordwrap_position) {
+		fputc('\n', stdout);
+		wordwrap_position = 0;
+	}
+}
+
+static void
+wordwrap_print(const char *word)
+{
+	if (!word) {
+		return;
+	}
+	unsigned wordlen = strlen(word);
+
+	/* handle really long words by making a best effort to start them on a new line */
+	if (wordlen >= wordwrap_columns) {
+		if (wordwrap_position) {
+			fputc('\n', stdout);
+		}
+		fputs(word, stdout);
+		fputc('\n', stdout);
+		wordwrap_position = 0;
+		return;
+	}
+
+	/* try to pack short words on a single line. wrap if too long. */
+	if (wordwrap_position + wordlen > wordwrap_columns) {
+		fputc('\n', stdout);
+		wordwrap_position = 0;
+	}
+	/* prefix additional words with a space */
+	if (wordwrap_position) {
+		fputc(' ', stdout);
+	}
+	fputs(word, stdout);
+	wordwrap_position += wordlen;
+}
+
+
 static void
 test(union word_node *curr, const char *pattern, const char *required_set)
 {
@@ -388,7 +441,7 @@ test(union word_node *curr, const char *pattern, const char *required_set)
 		}
 		if (pattern_check(key, pattern) == OK) {
 			if (!required_set || required_set_check(key, required_set) == OK) {
-				printf("WORD: %s\n", key);
+				wordwrap_print(key);
 			}
 		}
 	}
@@ -495,7 +548,9 @@ command(char *line)
 		}
 
 		printf("TRY \"%s\" [%s]\n", first, second);
+		wordwrap_start();
 		test(top_node, first, second);
+		wordwrap_end();
 	} else if (!strcmp("eliminate", cmd) || !strcmp("-", cmd)) {
 		print_valid_set("OLD set: ");
 		int i;
