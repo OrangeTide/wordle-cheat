@@ -5,7 +5,12 @@
 #include <string.h>
 #include <stdint.h>
 #include <ctype.h>
+#if defined(USE_EDITLINE)
 #include <editline.h>
+#else
+#include <readline/readline.h>
+#include <readline/history.h>
+#endif
 #include "wordlist.h"
 
 #define WORDLEN 5
@@ -812,6 +817,10 @@ command(char *line)
 static void
 interactive(void)
 {
+#if !defined(USE_EDITLINE)
+	using_history();
+#endif
+
 	char *line;
         while ((line = readline("> ")) != NULL) {
 		if (*line) {
