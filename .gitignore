@@ -2,3 +2,5 @@
 *.exe
 *~
 /wordle
+wordlist.h
+wordlist.c

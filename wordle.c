@@ -6,9 +6,8 @@
 #include <stdint.h>
 #include <ctype.h>
 #include <editline.h>
+#include "wordlist.h"
 
-// #define WORDS_FILENAME "/usr/share/dict/words"
-#define WORDS_FILENAME "wordlist.txt"
 #define WORDLEN 5
 #define LINEMAX 256
 #define WHITESPACE " \t\r\n"
@@ -314,13 +313,11 @@ words_reset(void)
 }
 
 void
-words_init(void)
+words_load_external(const char *filename)
 {
-	words_reset();
-
-	FILE *f = fopen(WORDS_FILENAME, "r");
+	FILE *f = fopen(filename, "r");
 	if (!f) {
-		perror(WORDS_FILENAME);
+		perror(filename);
 		exit(1);
 	}
 
@@ -339,6 +336,23 @@ words_init(void)
 	}
 
 	fclose(f);
+}
+
+void
+words_load_internal(void)
+{
+	unsigned i;
+
+	for (i = 0; i < wordlist_count; i++) {
+		int n = sizeof(*wordlist) - 1;
+		words_add(wordlist[i], n);
+	}
+}
+
+void
+words_init(void)
+{
+	words_reset();
 }
 
 const char *
@@ -505,12 +519,16 @@ help(void)
 	printf("Command reference:\n"
 	       "  quit - terminate the program\n"
 	       "  reset - reset the valid letter set\n"
-	       "  try [pattern] - try a pattern\n"
+	       "  try [word-pattern] [optional-required-letters] - try a pattern\n"
 	       "  eliminate [letters] - remove letters to the valid set\n"
 	       "  -[letters] - short-cut for 'eliminate'\n"
 	       "  restore [letters] - add letters to the valid set\n"
 	       "  +[letters] - short-cut for 'restore'\n"
 	       "  guess - record a guess and its result\n"
+               "Example Usage:\n"
+	       "  try g???t o\n"
+	       "  guess ghost xgxxy\n"
+	       "    xgxxy means (grey, green, grey, grey, yellow)\n"
 	      );
 }
 
@@ -808,8 +826,16 @@ interactive(void)
 }
 
 int
-main()
+main(int argc, char **argv)
 {
+	if (argc == 1) {
+		words_load_internal();
+	} else if (argc == 2) {
+		words_load_external(argv[1]);
+	} else {
+		fprintf(stderr, "Usage: %s [<wordlist.txt>]\n", argv[0]);
+		exit(1);
+	}
 	words_init();
 
 #if 0
