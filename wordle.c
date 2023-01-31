@@ -311,9 +311,6 @@ words_reset(void)
 		strcpy(valid_set[i], alphabet);
 	}
 
-	/* wordle words never end in 's' */
-	remove_from_valid_set("s", WORDLEN - 1);
-
 	needed_set[0] = 0;
 }
 
