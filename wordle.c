@@ -443,8 +443,10 @@ wordwrap_print(const char *word)
 		return;
 	}
 
+	wordlen++;
+
 	/* try to pack short words on a single line. wrap if too long. */
-	if (wordwrap_position + wordlen > wordwrap_columns) {
+	if (wordwrap_position + wordlen >= wordwrap_columns) {
 		fputc('\n', stdout);
 		wordwrap_position = 0;
 	}
